@@ -9,10 +9,12 @@ from django.test import override_settings
 from oauth2_provider.core.checks import (
     validate_access_token_expiry_configuration,
     validate_refresh_token_configuration,
+    validate_response_types_supported,
     validate_swapped_model_consistency,
     validate_token_configuration,
 )
 
+from . import presets
 from .common_testing import OAuth2ProviderTestCase as TestCase
 
 
@@ -152,3 +154,58 @@ class AccessTokenExpiryConfigurationCheckTestCase(TestCase):
                 messages = validate_access_token_expiry_configuration(None)
                 self.assertEqual([m.id for m in messages], ["oauth2_provider.E006"])
                 self.assertIsInstance(messages[0], checks.Error)
+
+
+@pytest.mark.usefixtures("oauth2_settings")
+class ResponseTypesSupportedCheckTestCase(TestCase):
+    def _messages(self):
+        return [m for m in validate_response_types_supported(None) if m.id == "oauth2_provider.W013"]
+
+    def test_check_is_registered_as_a_deploy_check(self):
+        from django.core.checks.registry import registry as checks_registry
+
+        self.assertIn(
+            validate_response_types_supported,
+            checks_registry.get_checks(include_deployment_checks=True),
+        )
+        # Advertising an unreachable response type is a misconfiguration rather than a
+        # runtime fault, so it is only reported by `manage.py check --deploy`.
+        self.assertNotIn(validate_response_types_supported, checks_registry.get_checks())
+
+    def test_default_response_types_pass(self):
+        self.assertEqual(self._messages(), [])
+
+    def test_unregistered_response_type_warns_with_the_accepted_values(self):
+        self.oauth2_settings.OAUTH2_RESPONSE_TYPES_SUPPORTED = ["code", "code assertion"]
+        (message,) = self._messages()
+        self.assertIsInstance(message, checks.Warning)
+        self.assertIn("code assertion", message.msg)
+        self.assertIn("OAUTH2_RESPONSE_TYPES_SUPPORTED", message.msg)
+        self.assertIn("The configured server accepts:", message.hint)
+
+    def test_oidc_response_types_are_not_checked_while_oidc_is_disabled(self):
+        # The OIDC discovery document that advertises them is not served, and the
+        # non-OIDC server registers none of the id_token response types.
+        self.oauth2_settings.OIDC_RESPONSE_TYPES_SUPPORTED = ["id_token token", "token id_token"]
+        self.assertEqual(self._messages(), [])
+
+
+@pytest.mark.usefixtures("oauth2_settings")
+@pytest.mark.oauth2_settings(presets.OIDC_SETTINGS_RW)
+class OIDCResponseTypesSupportedCheckTestCase(TestCase):
+    def _messages(self):
+        return [m for m in validate_response_types_supported(None) if m.id == "oauth2_provider.W013"]
+
+    def test_default_oidc_response_types_pass(self):
+        # Every default entry is a canonical ordering registered by oauthlib's OIDC server.
+        self.assertEqual(self._messages(), [])
+
+    def test_permuted_oidc_response_type_warns_with_the_canonical_ordering(self):
+        # "token id_token" is the same response type *set* as the registered
+        # "id_token token", but oauthlib only dispatches on the exact string.
+        self.oauth2_settings.OIDC_RESPONSE_TYPES_SUPPORTED = ["code", "token id_token"]
+        (message,) = self._messages()
+        self.assertIsInstance(message, checks.Warning)
+        self.assertIn("token id_token", message.msg)
+        self.assertIn("OIDC_RESPONSE_TYPES_SUPPORTED", message.msg)
+        self.assertIn("'id_token token'", message.hint)
