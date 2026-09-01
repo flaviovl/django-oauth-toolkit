@@ -189,6 +189,27 @@ class ResponseTypesSupportedCheckTestCase(TestCase):
         self.oauth2_settings.OIDC_RESPONSE_TYPES_SUPPORTED = ["id_token token", "token id_token"]
         self.assertEqual(self._messages(), [])
 
+    def test_non_string_entry_warns_instead_of_crashing(self):
+        # A config-validation check must report a bad entry, not traceback on it --
+        # Django's check runner does not catch exceptions from checks.
+        self.oauth2_settings.OAUTH2_RESPONSE_TYPES_SUPPORTED = ["code", 123]
+        (message,) = self._messages()
+        self.assertIsInstance(message, checks.Warning)
+        self.assertIn("'123'", message.msg)
+        self.assertIn("The configured server accepts:", message.hint)
+
+    def test_unconstructible_server_class_returns_no_messages(self):
+        # The documented contract: with no constructible server there is nothing to
+        # compare the advertised values against, so the check stays silent rather than
+        # crashing `manage.py check --deploy`.
+        class BoomServer:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("not constructible at check time")
+
+        self.oauth2_settings.OAUTH2_SERVER_CLASS = BoomServer
+        self.oauth2_settings.OAUTH2_RESPONSE_TYPES_SUPPORTED = ["bogus"]
+        self.assertEqual(self._messages(), [])
+
 
 @pytest.mark.usefixtures("oauth2_settings")
 @pytest.mark.oauth2_settings(presets.OIDC_SETTINGS_RW)
@@ -209,3 +230,15 @@ class OIDCResponseTypesSupportedCheckTestCase(TestCase):
         self.assertIn("token id_token", message.msg)
         self.assertIn("OIDC_RESPONSE_TYPES_SUPPORTED", message.msg)
         self.assertIn("'id_token token'", message.hint)
+
+    def test_entries_the_implicit_grant_gate_strips_from_discovery_are_skipped(self):
+        # With COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT on, discovery filters implicit
+        # response types order-independently, so a permuted implicit entry is never
+        # advertised and there is no discrepancy to report. A permuted *hybrid* entry
+        # (contains "code", so it survives the filter) is still advertised and dead,
+        # and still warns.
+        self.oauth2_settings.COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT = True
+        self.oauth2_settings.OIDC_RESPONSE_TYPES_SUPPORTED = ["code", "token id_token", "token code"]
+        (message,) = self._messages()
+        self.assertIn("token code", message.msg)
+        self.assertIn("'code token'", message.hint)

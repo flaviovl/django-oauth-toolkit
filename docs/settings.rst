@@ -685,9 +685,11 @@ A multi-valued ``response_type`` is an order-independent set per `OIDC Multiple 
 Type Encoding Practices
 <https://openid.net/specs/oauth-v2-multiple-response-types-1_0.html#terminology>`_ §4,
 but oauthlib dispatches an authorization request on the exact ``response_type`` string,
-so only the canonical orderings are accepted: an entry such as ``"token id_token"`` is
-always rejected with ``unsupported_response_type``. ``manage.py check --deploy`` reports
-any advertised entry the configured server cannot accept as ``oauth2_provider.W013``.
+so only the canonical orderings are served: a request using an entry such as
+``"token id_token"`` is rejected (with ``unsupported_response_type``, or with
+``unauthorized_client`` when the entry contains ``code``) rather than honored.
+``manage.py check --deploy`` reports any advertised entry the configured server cannot
+accept as ``oauth2_provider.W013``.
 
 OAUTH2_GRANT_TYPES_SUPPORTED
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

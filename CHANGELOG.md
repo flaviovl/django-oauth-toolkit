@@ -87,9 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoint can never accept. oauthlib routes an authorization request by exact-string lookup of
   `response_type`, while OIDC Multiple Response Type Encoding Practices §4 defines a multi-valued
   `response_type` as an order-independent set, so a hand-written permutation such as
-  `"token id_token"` is advertised by discovery but always rejected with
-  `unsupported_response_type`. The warning names the canonical ordering to use instead. What the
-  endpoints accept is unchanged.
+  `"token id_token"` is advertised by discovery but never honored: a request using it is
+  rejected with `unsupported_response_type` or `unauthorized_client`, depending on the entry.
+  The warning names the canonical ordering to use instead. What the endpoints accept is
+  unchanged.
 ### Changed
 * #483 A non-positive or non-numeric `ACCESS_TOKEN_EXPIRE_SECONDS` is now rejected with
   `ImproperlyConfigured` (and reported by `manage.py check` as `oauth2_provider.E006`) instead of
