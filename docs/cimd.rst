@@ -40,10 +40,19 @@ Because the application is keyed on the URL, distinct clients map to distinct ro
 bounded by the number of distinct client URLs rather than growing per registration.
 
 Validation follows the spec: the document's ``client_id`` must equal the URL it was fetched from, the
-client must be public — ``token_endpoint_auth_method`` must be ``none`` (the spec forbids shared-secret
-methods, and asymmetric methods such as ``private_key_jwt`` are not implemented) and the document must
-not contain a ``client_secret`` — and the document must register at least one redirect URI (only
-redirect-based grants are supported), matched exactly as for any other application.
+client must be public, and the document must register at least one redirect URI (only redirect-based
+grants are supported), matched exactly as for any other application. Being public means the resolved
+``token_endpoint_auth_method`` is ``none`` and the document carries no ``client_secret``. The spec
+forbids shared-secret methods, and asymmetric ones such as ``private_key_jwt`` are not implemented.
+
+A document may also publish ``token_endpoint_auth_methods_supported``, listing every method the client
+can use. When the method it chose in ``token_endpoint_auth_method`` is one this server does not
+register, the first offered method this server does support is used instead; when the chosen method is
+supported, it is honoured as chosen and never downgraded, because the spec (section 6.2) has the
+authorization server require client authentication of the registered type. Shared-secret methods are
+never registered, whatever a document offers. ChatGPT's published document has this shape: it chooses
+``private_key_jwt`` and offers ``["none", "private_key_jwt"]``, so a server without ``private_key_jwt``
+registers it as the public client it can also be.
 
 Settings
 --------

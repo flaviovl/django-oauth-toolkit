@@ -170,6 +170,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is unchanged in every case, only subclassing and patching are affected.
 
 ### Fixed
+* #1857 CIMD now reads `token_endpoint_auth_methods_supported` when the `token_endpoint_auth_method`
+  a document chooses is one this server does not register, and registers the client with the first
+  offered method it does support. A client that chooses `private_key_jwt` but says, in the same
+  document, that it can also be a public client was rejected outright; ChatGPT's published document
+  has exactly that shape. A method this server supports is still honoured as chosen and never
+  downgraded, and shared-secret methods remain unregisterable however a document offers them. See
+  `docs/cimd.rst`.
 * #1828 Two resource-server paths no longer log at the wrong level. A non-200 introspection
   response is an ordinary response, not an exception, so it is logged with `log.warning` instead
   of `log.exception` — the latter appended a meaningless `NoneType: None` line to every such
