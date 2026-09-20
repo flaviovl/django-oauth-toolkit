@@ -170,6 +170,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is unchanged in every case, only subclassing and patching are affected.
 
 ### Fixed
+* #1855 CIMD metadata that declares a supported grant type alongside one this library does not implement is now
+  accepted instead of rejected as a whole, per RFC 7591 section 2.1. A document is refused only when none of its
+  `grant_types` is one this library registers, and `authorization_code` is chosen when more than one is supported.
 * #1828 Two resource-server paths no longer log at the wrong level. A non-200 introspection
   response is an ordinary response, not an exception, so it is logged with `log.warning` instead
   of `log.exception` — the latter appended a meaningless `NoneType: None` line to every such

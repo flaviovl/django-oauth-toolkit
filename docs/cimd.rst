@@ -45,6 +45,11 @@ methods, and asymmetric methods such as ``private_key_jwt`` are not implemented)
 not contain a ``client_secret`` — and the document must register at least one redirect URI (only
 redirect-based grants are supported), matched exactly as for any other application.
 
+Grant types the server does not support are ignored rather than fatal, as RFC 7591 section 2.1
+requires: a document is rejected only when none of its ``grant_types`` is one this library
+registers. Because an application stores a single grant, ``authorization_code`` is chosen when the
+document declares more than one supported grant.
+
 Settings
 --------
 
