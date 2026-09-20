@@ -54,6 +54,11 @@ GRANT_TYPE_MAP = {
 # GRANT_TYPE_MAP above and dropped like any other grant this server does not register.
 IGNORED_GRANT_TYPES = {"refresh_token"}
 
+# token_endpoint_auth_method values a CIMD registration can be stored with. The
+# spec forbids shared-secret methods (no shared secret can be established), and
+# the asymmetric ones are not wired to CIMD yet, so "none" is the whole set.
+SUPPORTED_AUTH_METHODS = ("none",)
+
 # Cache-freshness lives on the model (cimd_expires_at, durable and authoritative
 # per row); the failure backoff is ephemeral/best-effort, so it lives in the
 # cache under this prefix.
@@ -344,18 +349,54 @@ def _resolve_grant_type(grant_types):
     return GRANT_TYPE_MAP[preferred]
 
 
+def _resolve_auth_method(metadata):
+    """Resolve the token_endpoint_auth_method a CIMD registration is stored with.
+
+    ``token_endpoint_auth_method`` carries the client's chosen method. When this
+    server supports it, it wins: the spec (section 6.2) has the authorization server
+    require client authentication of the registered type, so a client that chose an
+    asymmetric method must not be quietly downgraded to a public one.
+
+    When this server does *not* support the chosen method, the document may still
+    name others it can use in ``token_endpoint_auth_methods_supported``, a property
+    the spec permits (section 4.1: a document MAY define additional properties) and
+    published clients rely on: ChatGPT's document at
+    https://chatgpt.com/oauth/client.json chooses ``private_key_jwt`` and offers
+    ``["none", "private_key_jwt"]``, expecting a server without ``private_key_jwt``
+    to register it as the public client it can also be. The first offered method
+    this server supports wins, so the client's own ordering decides.
+
+    Shared-secret methods can never be negotiated this way, whatever a document
+    offers, because :data:`SUPPORTED_AUTH_METHODS` does not contain any.
+    """
+    declared = metadata.get("token_endpoint_auth_method", "none")
+    if declared in SUPPORTED_AUTH_METHODS:
+        return declared
+
+    offered = metadata.get("token_endpoint_auth_methods_supported")
+    if isinstance(offered, list):
+        for method in offered:
+            if method in SUPPORTED_AUTH_METHODS:
+                return method
+
+    raise CIMDError(
+        f"client metadata declares token_endpoint_auth_method {declared!r} and offers "
+        f"{offered!r}; this server registers CIMD clients with {list(SUPPORTED_AUTH_METHODS)}"
+    )
+
+
 def _build_application_kwargs(metadata):
     """Convert a CIMD metadata document to public-Application field kwargs.
 
-    Requires ``token_endpoint_auth_method`` ``"none"`` — the spec forbids
-    shared-secret methods, and asymmetric ones such as ``private_key_jwt``
-    are not implemented — rejects any ``client_secret`` property, and requires
-    at least one redirect URI. Returns kwargs; raises :class:`CIMDError` on
-    invalid metadata.
+    Resolves the client authentication method with :func:`_resolve_auth_method`
+    (only ``"none"`` can be stored today), rejects any ``client_secret``
+    property, and requires at least one redirect URI. Returns kwargs; raises
+    :class:`CIMDError` on invalid metadata.
     """
-    auth_method = metadata.get("token_endpoint_auth_method", "none")
-    if auth_method != "none":
-        raise CIMDError(f"CIMD clients must be public; got token_endpoint_auth_method {auth_method!r}")
+    # Only "none" can be stored today, so the resolved value is already implied by
+    # the public client_type _fetch_validate_upsert sets; resolving is still what
+    # rejects a document this server cannot register at all.
+    _resolve_auth_method(metadata)
     # Spec: neither property may appear in a CIMD document (presence, not value).
     if "client_secret" in metadata or "client_secret_expires_at" in metadata:
         raise CIMDError("CIMD client metadata must not include client_secret or client_secret_expires_at")

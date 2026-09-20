@@ -24,6 +24,7 @@ from oauth2_provider.cimd import (
     _effective_max_age,
     _ip_is_public,
     _resolve_and_validate,
+    _resolve_auth_method,
     _resolve_grant_type,
     _validate_client_id_url,
     is_cimd_client_id,
@@ -276,12 +277,103 @@ def test_build_application_kwargs_public():
         _document(grant_types=["client_credentials"]),  # not a public/known grant
         _document(grant_types=[]),  # nothing left to register
         _document(grant_types=["refresh_token"]),  # refresh alone registers no flow
+        # A method this server cannot register, with no usable alternative offered.
+        _document(
+            token_endpoint_auth_method="private_key_jwt",
+            token_endpoint_auth_methods_supported=["private_key_jwt"],
+        ),
+        # A shared-secret method is never negotiable, however the document offers it.
+        _document(
+            token_endpoint_auth_method="private_key_jwt",
+            token_endpoint_auth_methods_supported=["client_secret_basic"],
+        ),
+        _document(token_endpoint_auth_method="private_key_jwt"),  # no plural field
+        _document(  # plural field present but not a list
+            token_endpoint_auth_method="private_key_jwt",
+            token_endpoint_auth_methods_supported="none",
+        ),
         _document(client_name=123),
     ],
 )
 def test_build_application_kwargs_rejects(document):
     with pytest.raises(CIMDError):
         _build_application_kwargs(document)
+
+
+def test_resolve_auth_method_defaults_to_none():
+    assert _resolve_auth_method({}) == "none"
+
+
+def test_resolve_auth_method_keeps_a_supported_declared_method():
+    """A method this server supports wins over anything the plural field offers.
+
+    Spec section 6.2: communication with the authorization server must use client
+    authentication of the registered type, so a client's own choice is never
+    quietly downgraded to a weaker one.
+    """
+    document = _document(
+        token_endpoint_auth_method="none",
+        token_endpoint_auth_methods_supported=["private_key_jwt", "none"],
+    )
+
+    assert _resolve_auth_method(document) == "none"
+
+
+def test_resolve_auth_method_negotiates_from_the_plural_field():
+    """The shape is the one ChatGPT publishes at https://chatgpt.com/oauth/client.json.
+
+    It chooses ``private_key_jwt``, which this server does not register for a CIMD
+    client, and offers ``none`` alongside it. Reading only the chosen method rejects
+    a client that says, in the same document, that it can be the public client this
+    server does support.
+    """
+    document = _document(
+        token_endpoint_auth_method="private_key_jwt",
+        token_endpoint_auth_methods_supported=["none", "private_key_jwt"],
+    )
+
+    assert _resolve_auth_method(document) == "none"
+
+
+def test_resolve_auth_method_ignores_non_string_entries():
+    document = _document(
+        token_endpoint_auth_method="private_key_jwt",
+        token_endpoint_auth_methods_supported=[123, None, "none"],
+    )
+
+    assert _resolve_auth_method(document) == "none"
+
+
+def test_resolve_auth_method_error_names_the_declared_method():
+    document = _document(
+        token_endpoint_auth_method="private_key_jwt",
+        token_endpoint_auth_methods_supported=["private_key_jwt"],
+    )
+
+    with pytest.raises(CIMDError, match="private_key_jwt"):
+        _resolve_auth_method(document)
+
+
+def test_build_application_kwargs_registers_the_chatgpt_transition_document():
+    """The published document, unchanged, must resolve to a public client."""
+    document = {
+        "client_id": CLIENT_URL,
+        "client_uri": "https://chatgpt.com/",
+        "redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
+        "token_endpoint_auth_method": "private_key_jwt",
+        "token_endpoint_auth_methods_supported": ["none", "private_key_jwt"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "client_name": "ChatGPT",
+        "token_endpoint_auth_signing_alg": "RS256",
+        "jwks_uri": "https://chatgpt.com/oauth/jwks.json",
+    }
+
+    assert _build_application_kwargs(document) == {
+        "name": "ChatGPT",
+        "redirect_uris": "https://chatgpt.com/connector_platform_oauth_redirect",
+        "authorization_grant_type": "authorization-code",
+    }
 
 
 def test_resolve_grant_type_ignores_refresh_token():
